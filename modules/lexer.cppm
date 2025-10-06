@@ -126,7 +126,7 @@ private:
 export class Lexer
 {
 public:
-    Lexer(std::string str, std::list<LexerRule> matches, std::vector<char> whiteSpaceList = { '\t', '\r', '\n', ' ' }, std::string endFlags = "EOL")
+    Lexer(std::string str, std::list<LexerRule> matches, std::vector<char> whiteSpaceList = { '\t', '\r', ' ' }, std::string endFlags = "EOL")
     {
         this->str = str;
         this->matches = matches;

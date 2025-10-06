@@ -115,16 +115,17 @@ public:
 				continue;
 			}
 
-			LexerResult(results);
+			LexerResult result2 = LexerResult(results);
 
 			bool matched;
 
 			for (auto& it : this->rule)
 			{
-				Option<int> ret = it.press(rule, result);
+				Option<int> ret = it.press(rule, result2);
 				if (ret.Ok()) 
 					std::cout << "; Value: " << ret.Data() << std::endl;
 				matched = ret.Ok();
+				break;
 			}
 
 			if (!matched)
@@ -142,26 +143,51 @@ private:
 export class Node
 {
 public:
-	// virtual int codegen() = 0;
-	virtual int visit() = 0;
+	virtual int codegen(char* mem) = 0;
 };
 
 // 加法节点
-class AddNode
+export class MathOpNode
 	: public Node
 {
 public:
-	AddNode(int n1, int n2)
+	MathOpNode(std::string nreg, char sym, int n)
 	{
-		this->n1 = n1;
-		this->n2 = n2;
+		this->nreg = nreg;
+		this->n = n;
+		this->sym = sym;
 	}
 
-	virtual int visit() override
+	virtual int codegen(char *mem) override
 	{
-		printf("Result: %d\n", n1 + n2);
-		return n1 + n2;
+		unsigned char reg = 0;
+		if (nreg == "r0")
+			reg = 0;
+		else if (nreg == "r1")
+			reg = 1;
+		else if (nreg == "r2")
+			reg = 2;
+		else if (nreg == "r3")
+			reg = 3;
+		else if (nreg == "r4")
+			reg = 4;
+		else if (nreg == "sp")
+			reg = 6;
+		else if (nreg == "bp")
+			reg = 7;
+
+		switch (sym)
+		{
+		case '+':
+			mem[0] = 0xA1;
+			mem[1] = reg;
+			*reinterpret_cast<int*>(mem + 2) = n;
+		}
+
+		return 6;
 	}
 private:
-	int n1, n2;
+	std::string nreg;
+	int n;
+	char sym;
 };
