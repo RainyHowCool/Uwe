@@ -16,7 +16,7 @@ project ("Uwe")
 
 # 将源代码添加到此项目的可执行文件。
 add_executable (Uwe)
-target_sources(Uwe PRIVATE src/main.cpp)
+target_sources(Uwe PRIVATE src/main.cpp "src/ir.cpp" )
 target_sources(
     Uwe
     PRIVATE FILE_SET CXX_MODULES FILES "modules/lexer.cppm" "modules/parser.cppm" "modules/vm.cppm" "modules/logger.cppm")

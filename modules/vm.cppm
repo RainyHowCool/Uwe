@@ -6,11 +6,11 @@ module;
 #include <string>
 #include <stdint.h>
 #include <format>
-
-import logger;
-
+#include <iostream>
 
 export module vm;
+
+import logger;
 
 // 虚拟机基本信息
 export struct VMInfo
@@ -25,12 +25,13 @@ export struct VMInfo
 	uint32_t vmCodeRegionOffest;
 	// 标志位
 	uint8_t vmFlags;
-	// reserved
-	uint8_t ar1;
-	uint16_t ar2;
-	uint32_t ar3;
+	// 保留位 ( 为了 4 字节 对齐 )
+	uint8_t reserved1;
+	uint16_t reserved2;
+	uint32_t reserved3;
 };
 
+// 寄存器结构体
 struct VMRegister
 {
 public:
@@ -44,15 +45,17 @@ public:
 	uint32_t bp = 0;
 };
 
+// 字节码
 enum Opcode
 {
-	MOV = 0xA0, ADD = 0xA1, QUIT = 0xA2
+	MOV = 0xA0, ADD = 0xA1, SUB = 0xA2, MUL = 0xA3, DIV = 0xA4, QUIT = 0xF0
 };
 
+// 虚拟机实例
 export class VMInstance 
 {
 public:
-	VMInstance(uint8_t* vmRaw, int sizeOfRaw, int vmMemSize = 256 * 1024 * 1024)
+	VMInstance(uint8_t* vmRaw, int sizeOfRaw, int vmMemSize = 1024 * 1024 * 1024)
 	{
 		vmRegister = reinterpret_cast<VMRegister*>(calloc(sizeof(VMRegister), sizeof(VMRegister)));
 		// 1. 加载虚拟机信息
@@ -70,16 +73,17 @@ public:
 		// 3. 分配虚拟机内存
 		this->vmMemory = new uint8_t[vmMemSize];
 		if (vmMemory == nullptr)
-			Log.fatal(std::format("Alloc memory {} MiB failed!", vmMemSize / 1024 / 1024));
+		{
+			fprintf(stderr, "VM: Alloc memory %d MiB failed!\n", vmMemSize / 1024 / 1024);
+			exit(-1);
+		}
 		if (debug)
-			Log.debug(std::format("Alloced memory size: {} MiB", vmMemSize / 1024 / 1024));
+			printf("VM: Alloced memory size: %d MiB\n", vmMemSize / 1024 / 1024);
 		// 4. 拷贝原始数据
 		this->vmMemSize = vmMemSize;
 		// 5. 拷贝虚拟机数据
 		memcpy(this->vmMemory, vmRaw, sizeOfRaw);
-		char buffer[4096];
-		sprintf(buffer, "%d bytes has been copyed to %#x from %#x", sizeof(vmRaw), reinterpret_cast<size_t>(vmRaw), reinterpret_cast<size_t>(vmMemory));
-		Log.debug(buffer);
+		printf("VM: %zu bytes has been copyed to %#zx from %#zx\n", sizeof(vmRaw), reinterpret_cast<size_t>(vmRaw), reinterpret_cast<size_t>(vmMemory));
 	}
 
 
@@ -88,60 +92,77 @@ public:
 		// 1. 加载分段
 		code = vmMemory + vmInfo->vmCodeRegionOffest;
 		data = vmMemory + vmInfo->vmDataRegionOffest;
-		vmRegister->pc = 0;
-		// 2. 执行代码
+		// 2. 初始化变量
+		int mode = 0;
+		uint32_t* firReg = nullptr;
+		uint32_t* secReg = nullptr;
+		int imm = 0;
+		printf("VM: One-Step Debug enabled\n\n");
+		// 3. 执行代码
 		for (;;)
 		{
+			if (debug) 
+				oneStepDebug();
+			// TODO: 化简再化简
 			switch (readCode())
 			{
 			case MOV:
-			{
-				vmRegister->pc++;
-				uint8_t regBit = readCode();
-				// 获取模式（当前字符前两位，11为寄存器相加，00为寄存器加数值）
-				uint8_t mode = regBit >> 6;
-				// 获取次寄存器（当前字符第3到第5位）
-				uint32_t* secReg = getRegister(regBit & 0b00111000 >> 3);
-				// 获取主寄存器（最后三位）
-				uint32_t* firSeg = getRegister(regBit & 0b00000111);
-				int imm = 255;
-				if (mode == 00) { imm = readInt(vmRegister->pc++); *firSeg = imm; }
-				else if (mode == 11) *firSeg = *secReg;
+				getArguments(&mode, &firReg, &secReg, &imm, vmRegister->pc++);
+				if (mode == 0b0) *firReg = imm;
+				else if (mode == 0b11) { vmRegister->r0 = *secReg; vmRegister->pc -= 4; }
 				else Log.fatal("MOV: Unmatched mode");
-				Log.debug(std::format("Register {} is imm {}\nR0: {}", regBit, imm, vmRegister->r0));
 				break;
-			}
 			case ADD: 
-			{
-				vmRegister->pc++;
-				uint8_t regBit = readCode();
-				// 获取模式（当前字符前两位，11为寄存器相加，00为寄存器加数值）
-				uint8_t mode = regBit >> 6;
-				// 获取次寄存器（当前字符第3到第5位）
-				uint32_t* secReg = getRegister(regBit & 0b00111000 >> 3);
-				// 获取主寄存器（最后三位）
-				uint32_t* firSeg = getRegister(regBit & 0b00000111);
-				int imm = 255;
-				if (mode == 00) { imm = readInt(vmRegister->pc++); *firSeg += imm; }
-				else if (mode == 11) *firSeg += *secReg;
+				getArguments(&mode, &firReg, &secReg, &imm, vmRegister->pc++);
+				if (mode == 0b0) *firReg += imm;
+				else if (mode == 0b11) { *firReg += *secReg; vmRegister->pc -= 4; }
 				else Log.fatal("ADD: Unmatched mode");
-				Log.debug(std::format("Register {} adds imm {}\nR0: {}", regBit, imm, vmRegister->r0));
 				break;
-			}
+			case SUB:
+				getArguments(&mode, &firReg, &secReg, &imm, vmRegister->pc++);
+				if (mode == 0b0) *firReg -= imm;
+				else if (mode == 0b11) { *firReg -= *secReg; vmRegister->pc -= 4; }
+				else Log.fatal("SUB: Unmatched mode");
+				break;
+			case MUL:
+				getArguments(&mode, &firReg, &secReg, &imm, vmRegister->pc++);
+				if (mode == 0b0) *firReg *= imm;
+				else if (mode == 0b11) { *firReg *= *secReg; vmRegister->pc -= 4; }
+				else Log.fatal("MUL: Unmatched mode");
+				break;
+			case DIV:
+				getArguments(&mode, &firReg, &secReg, &imm, vmRegister->pc++);
+				if (mode == 0b0) *firReg /= imm;
+				else if (mode == 0b11) { *firReg /= *secReg; vmRegister->pc -= 4; }
+				else Log.fatal("DIV: Unmatched mode");
+				break;
 			case QUIT:
-				Log.info("Bye!");
-				exit(0);
+				printf("VM: Program quited");
+				exit(vmRegister->r0);
 			}
 			vmRegister->pc++;
 		}
 	}
 private:
+	// 从当前指向位置加载 1 字节数据
 	uint8_t readCode(int _before = 0)
 	{
 		return *reinterpret_cast<uint8_t*>(reinterpret_cast<size_t>(code) + this->vmRegister->pc);
 	}
 
+	void getArguments(int* mode, uint32_t** firReg, uint32_t** secReg, int *imm, int before = 0)
+	{
+		uint8_t regBit = readCode();
+		// 获取模式 ( 当前字符前两位，11 为寄存器相加，00 为寄存器加数值 )
+		*mode = regBit >> 6;
+		// 获取次寄存器 ( 当前字符第 3 到第 5 位 )
+		*secReg = getRegister(regBit & 0b00111000 >> 3);
+		// 获取主寄存器 ( 最后 3 位 )
+		*firReg = getRegister(regBit & 0b00000111);
+		*imm = readInt(vmRegister->pc++);
+	}
 
+	// 获取寄存器的指针
 	uint32_t* getRegister(uint8_t reg)
 	{
 		switch (reg)
@@ -159,6 +180,7 @@ private:
 		return nullptr;
 	}
 
+	// 从当前指向位置加载 4 字节数据
 	uint32_t readInt(int _before = 0)
 	{
 		int res = 0;
@@ -171,19 +193,43 @@ private:
 
 	static void printVMInfo(VMInfo* vmInfo)
 	{
+		printf("VM: Debug enabled\n");
+		printf("UweVM Header Information\n");
+		printf("==========================\n");
+		printf("\tMagic Number:\t %#x\n", vmInfo->vmMagicNumber);
+		printf("\tVM Version:\t %d\n", vmInfo->vmVersion);
+		printf("\tVM Flags:\t %#x\n", vmInfo->vmFlags);
+		printf("\tData Offest:\t %d\n", vmInfo->vmDataRegionOffest);
+		printf("\tCode Offest:\t %d\n", vmInfo->vmCodeRegionOffest);
+	}
+
+	// 打印寄存器信息
+	void printAllRegisters()
+	{
 		char buffer[4096];
-		Log.debug("UweVM Header Information\n");
-		Log.debug("==========================\n");
-		sprintf(buffer, "\tMagic Number:\t %#x\n", vmInfo->vmMagicNumber);
-		Log.debug(buffer);
-		sprintf(buffer, "\tVM Version:\t %d\n", vmInfo->vmVersion);
-		Log.debug(buffer);
-		sprintf(buffer, "\tVM Flags:\t %#x\n", vmInfo->vmFlags);
-		Log.debug(buffer);
-		sprintf(buffer, "\tData Offest:\t %d\n", vmInfo->vmDataRegionOffest);
-		Log.debug(buffer);
-		sprintf(buffer, "\tCode Offest:\t %d\n", vmInfo->vmCodeRegionOffest);
-		Log.debug(buffer);
+		sprintf(buffer, "\tr0: %#x(%d) r1: %#x(%d) r2: %#x(%d) r3: %#x(%d)\n\tr4: %#x(%d) pc: %#x(%d) sp: %#x(%d) bp: %#x(%d)\n",
+			vmRegister->r0, vmRegister->r0, vmRegister->r1, vmRegister->r1, vmRegister->r2, vmRegister->r2,
+			vmRegister->r3, vmRegister->r3, vmRegister->r4, vmRegister->r4, vmRegister->pc, vmRegister->pc,
+			vmRegister->sp, vmRegister->sp, vmRegister->bp, vmRegister->bp);
+		printf("All registers\n===============\n%s", buffer);
+	}
+
+	// 单步调试
+	void oneStepDebug()
+	{
+		for (;;)
+		{
+			std::string in;
+			printf("(%#x) ", vmRegister->pc);
+			fflush(stdout);
+			std::cin >> in;
+			if (in == "r") printAllRegisters();
+			else if (in == "n") break;
+			else if (in == "s") { debug = false; break; }
+			else if (in == "p") printf("%#x: %#x", vmRegister->pc, *(vmMemory + vmRegister->pc));
+			else printf("Bad command %s", in.c_str());
+			printf("\n");
+		}
 	}
 
 	bool debug = false;

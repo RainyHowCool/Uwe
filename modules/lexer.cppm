@@ -6,9 +6,9 @@ module;
 #include <regex>
 #include <list>
 
-import logger;
-
 export module lexer;
+
+import logger;
 
 export class LexerRule 
 {

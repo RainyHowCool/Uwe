@@ -6,6 +6,8 @@ module;
 #include <format>
 #include <filesystem>
 
+export module logger;
+
 namespace fs = std::filesystem;
 
 constexpr int TRACE = 1;
@@ -15,8 +17,6 @@ constexpr int NOTE = 4;
 constexpr int WARN = 5;
 constexpr int ERROR = 6;
 constexpr int FATAL = 7;
-
-export module logger;
 
 export class Logger
 {
@@ -64,6 +64,7 @@ public:
 	std::string outputFormat = "[TYPE]INFO -> TIME";
 	std::string fileName = "info.log";
 	std::string timeColor = "\033[93m";
+	bool colorEnabled = true;
 private:
 	const std::string fatal_text = "fatal";
 	std::string level2name(int level)
@@ -147,7 +148,10 @@ private:
 		file.close();
 		if (level < minOutputLevel)
 			return;
-		std::cout << colorRaw << std::endl;
+		if (colorEnabled)
+			std::cout << colorRaw << std::endl;
+		else
+			std::cout << raw << std::endl;
 		if (levelName == fatal_text)
 			exit(1);
 	}
