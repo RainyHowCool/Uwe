@@ -5,6 +5,8 @@ module;
 #include <iostream>
 #include <regex>
 #include <list>
+#include <unordered_set>
+#include <string_view>
 
 export module lexer;
 
@@ -126,83 +128,73 @@ private:
 export class Lexer
 {
 public:
-    Lexer(std::string str, std::list<LexerRule> matches, std::vector<char> whiteSpaceList = { '\t', '\r', ' ' }, std::string endFlags = "EOL")
+    Lexer(std::string str, std::list<LexerRule> matches,
+          std::vector<char> whiteSpaceList = { '\t', '\r', ' ' },
+          std::string endFlags = "EOL")
     {
-        this->str = str;
-        this->matches = matches;
-        this->whiteSpaceList = whiteSpaceList;
-        this->endFlags = endFlags;
+        this->str = std::move(str);
+        this->matchesVec.assign(matches.begin(), matches.end());
+        this->whiteSpaceSet = std::unordered_set<char>(whiteSpaceList.begin(), whiteSpaceList.end());
+        this->endFlags = std::move(endFlags);
     }
 
-    // 检测是否是空格
     const bool check_whitespace(char ch) const
     {
-        return std::count(whiteSpaceList.begin(), whiteSpaceList.end(), ch);
+        return whiteSpaceSet.count(ch) > 0;
     }
 
-    //向空值表中插值
-    void insert_whitespace(char ch) 
+    void insert_whitespace(char ch)
     {
-        this->whiteSpaceList.push_back(ch);
+        this->whiteSpaceSet.insert(ch);
     }
 
     LexerResult tokenize()
     {
         std::vector<MatchResult> match;
+        match.reserve(str.size()); // 预分配空间
         size_t pos = 0;
-        // 1. 检测字符串是否为空
         if (str.empty()) throw "Empty String!";
         size_t len = str.length();
 
-        // 开始逐字符进行匹配
+        std::string_view strview(str);
+
         while (pos < len)
         {
-            bool matched = false;
-            // 如果当前字符是空字符则跳过
-            if (check_whitespace(str[pos]))
+            if (check_whitespace(strview[pos]))
             {
-                pos++;
+                ++pos;
                 continue;
             }
 
-            // 在当前位置尝试所有模式
-            for (const auto& jt : matches)
+            bool matched = false;
+            for (const auto& jt : matchesVec)
             {
-                // 储存结果
-                std::smatch result;
-                // 用于获取可匹配的区域
-                // TODO: 看看放在 regex_search 中会不会报错
-                std::string strmatch = str.substr(pos);
-                // FIX: 添加 result.position 检测以防止匹配到后面的内容
-                // WHY: 为什么 match 不能用aaaaaaaaaaaaaaaaaa
-                if (std::regex_search(strmatch, result, jt.match) &&
-                    result.position() == 0) {
-                    std::string resultString = result[0].str();
-                    match.push_back(MatchResult(resultString, jt.type));
-                    pos += result[0].str().length();
+                std::match_results<std::string_view::const_iterator> result;
+                auto subview = strview.substr(pos);
+                if (std::regex_search(subview.begin(), subview.end(), result, jt.match) &&
+                    result.position() == 0)
+                {
+                    std::string resultString(result[0].first, result[0].second);
+                    match.emplace_back(resultString, jt.type);
+                    pos += result[0].length();
                     matched = true;
                     break;
                 }
             }
 
-            // 如果没有匹配成功则代表有不规则字符出现
-            if (!matched) 
+            if (!matched)
             {
-                std::cout << "Unregioned char " << str[pos] << std::endl;
+                std::cout << "Unregioned char " << strview[pos] << std::endl;
+                ++pos;
             }
         }
-        match.push_back(MatchResult("", "EOL"));
-        LexerResult lexerResult(match);
-        return lexerResult;
+        match.emplace_back("", "EOL");
+        return LexerResult(match);
     }
 
 private:
-    // 将要匹配的字符串
     std::string str;
-    // 所有匹配模式
-    std::list<LexerRule> matches;
-    // 空格表
-    std::vector<char> whiteSpaceList;
-    // 结束标识符
+    std::vector<LexerRule> matchesVec;
+    std::unordered_set<char> whiteSpaceSet;
     std::string endFlags;
 };

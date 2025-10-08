@@ -15,7 +15,7 @@ import parser;
 import logger;
 import vm;
 
-#define LRULE(x, y) LexerRule(std::regex(x), y)
+#define LRULE(x, y) LexerRule(std::regex(x, std::regex_constants::optimize), y)
 
 // 节点树
 std::vector<Node*> Nodes;
@@ -107,6 +107,7 @@ static std::list<ParserRule> getASTRules()
 
 int generate_ir(std::string code, char** memory)
 {
+	printf("Load IR Code: Done.\n");
 	// 初始化变量
 	Nodes.clear();
 	pc = 24;
@@ -116,17 +117,22 @@ int generate_ir(std::string code, char** memory)
 
 	// IR 的 Lexer 规则
 	auto matches = getLexerRules();
+	printf("Lexer rules loaded: Done.\n");
 
 	// IR 的 AST 规则
 	auto rules = getASTRules();
-
-	// 运行词法解析器
-	Lexer lexer(code, matches);
-	LexerResult result = lexer.tokenize();
+	printf("Parser rules loaded: Done.\n");
 
 	// 运行语法解析器
+	Lexer lexer(code, matches);
+	printf("Lexical analysis: Running...\n");
+	LexerResult result = lexer.tokenize();
+	printf("Lexical analysis: Done.\n");
+
+	// 运行词法解析器
 	Parser parser(result, rules);
 	parser.parse();
+	printf("Syntax analysis: Done.\n");
 
 	// 设置初始化信息
 	VMInfo* vmInfo = reinterpret_cast<VMInfo*>(*mem);
@@ -138,11 +144,13 @@ int generate_ir(std::string code, char** memory)
 	vmInfo->vmDataRegionOffest = 24;
 	vmInfo->vmCodeRegionOffest = pc;
 	vmInfo->reserved3 = 0x91919191;
+	printf("VM Info initialized: Done.\n");
 
 	// 开始编译
 	for (auto& it : Nodes)
 		// 返回指令长度 ( UweVM 采用 CISC 指令集 )
 		pc += it->codegen(*mem + pc);
+	printf("Code generation: Done.\n");
 
 	// 最后必须添加用于退出的指令
 	*((*mem) + pc) = 0xF0;

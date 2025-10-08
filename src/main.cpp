@@ -20,14 +20,14 @@ int main(int argc, char** argv)
 	in << ifs.rdbuf();
 	std::string str(in.str());
 
-	char* mem = new char[1024];
+	char* mem = new char[1024 * 1024 * 1024];
 
 	int len = generate_ir(str, &mem);
 
 	Log.outputFormat = "VM: INFO";
 	Log.colorEnabled = false;
 	VMInstance vm(reinterpret_cast<uint8_t*>(mem), len);
-
+	printf("VM Initialized: Done.\n");
 	vm.run();
 
 	return 0;
