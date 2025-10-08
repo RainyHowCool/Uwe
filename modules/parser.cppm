@@ -123,7 +123,8 @@ public:
 			{
 				Option<int> ret = it.press(rule, result2);
 				matched = ret.Ok();
-				break;
+				if (ret.Ok())
+					break;
 			}
 
 			if (!matched)
@@ -157,7 +158,7 @@ unsigned char getRegisterByString(std::string nreg)
 		reg = 2;
 	else if (nreg == "r3")
 		reg = 3;
-	else if (nreg == "r4")
+	else if (nreg == "ss")
 		reg = 4;
 	else if (nreg == "sp")
 		reg = 6;
@@ -230,4 +231,42 @@ public:
 private:
 	std::string nreg1;
 	std::string nreg2;
+};
+
+export class PushNode
+	: public Node
+{
+public:
+	PushNode(std::string nreg)
+	{
+		this->nreg = nreg;
+	}
+	virtual int codegen(char* mem) override
+	{
+		mem[0] = 0xA5;
+		unsigned char reg = getRegisterByString(nreg);
+		mem[1] = reg;
+		return 2;
+	}
+private:
+	std::string nreg;
+};
+
+export class PopNode
+	: public Node
+{
+public:
+	PopNode(std::string nreg)
+	{
+		this->nreg = nreg;
+	}
+	virtual int codegen(char* mem) override
+	{
+		mem[0] = 0xA6;
+		unsigned char reg = getRegisterByString(nreg);
+		mem[1] = reg;
+		return 2;
+	}
+private:
+	std::string nreg;
 };

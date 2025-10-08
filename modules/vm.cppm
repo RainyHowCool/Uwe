@@ -39,7 +39,7 @@ public:
 	uint32_t r1;
 	uint32_t r2;
 	uint32_t r3;
-	uint32_t r4;
+	uint32_t ss = 0;
 	uint32_t pc = 0;
 	uint32_t sp = 0;
 	uint32_t bp = 0;
@@ -48,14 +48,14 @@ public:
 // 字节码
 enum Opcode
 {
-	MOV = 0xA0, ADD = 0xA1, SUB = 0xA2, MUL = 0xA3, DIV = 0xA4, QUIT = 0xF0
+	MOV = 0xA0, ADD = 0xA1, SUB = 0xA2, MUL = 0xA3, DIV = 0xA4, PUSH = 0xA5, POP = 0xA6, QUIT = 0xF0
 };
 
 // 虚拟机实例
 export class VMInstance 
 {
 public:
-	VMInstance(uint8_t* vmRaw, int sizeOfRaw, int vmMemSize = 1024 * 1024 * 1024)
+	VMInstance(uint8_t* vmRaw, int sizeOfRaw, int vmMemSize = 4 * 1024 * 1024)
 	{
 		vmRegister = reinterpret_cast<VMRegister*>(calloc(sizeof(VMRegister), sizeof(VMRegister)));
 		// 1. 加载虚拟机信息
@@ -84,32 +84,31 @@ public:
 		// 5. 拷贝虚拟机数据
 		memcpy(this->vmMemory, vmRaw, sizeOfRaw);
 		printf("VM: %zu bytes has been copyed to %#zx from %#zx\n", sizeof(vmRaw), reinterpret_cast<size_t>(vmRaw), reinterpret_cast<size_t>(vmMemory));
+		// 6. 设置栈起始位置
+		vmRegister->sp = vmMemSize;
 	}
 
 
 	void run()
 	{
-		// 1. 加载分段
-		code = vmMemory + vmInfo->vmCodeRegionOffest;
-		data = vmMemory + vmInfo->vmDataRegionOffest;
-		// 2. 初始化变量
+		// 1. 初始化变量
 		int mode = 0;
 		uint32_t* firReg = nullptr;
 		uint32_t* secReg = nullptr;
 		int imm = 0;
 		printf("VM: One-Step Debug enabled\n\n");
-		// 3. 执行代码
+		vmRegister->ss = vmInfo->vmCodeRegionOffest;
+		// 2. 执行代码
 		for (;;)
 		{
-			if (debug) 
-				oneStepDebug();
+			oneStepDebug();
 			// TODO: 化简再化简
 			switch (readCode())
 			{
 			case MOV:
 				getArguments(&mode, &firReg, &secReg, &imm, vmRegister->pc++);
 				if (mode == 0b0) *firReg = imm;
-				else if (mode == 0b11) { vmRegister->r0 = *secReg; vmRegister->pc -= 4; }
+				else if (mode == 0b11) { *firReg = *secReg; vmRegister->pc -= 4; }
 				else Log.fatal("MOV: Unmatched mode");
 				break;
 			case ADD: 
@@ -136,8 +135,17 @@ public:
 				else if (mode == 0b11) { *firReg /= *secReg; vmRegister->pc -= 4; }
 				else Log.fatal("DIV: Unmatched mode");
 				break;
+			case PUSH:
+				vmRegister->sp -= 4;
+				*(uint32_t*)(vmMemory + vmRegister->sp) = *getRegister(readCode(vmRegister->pc++));
+				break;
+			case POP:
+				*getRegister(readCode(vmRegister->pc++)) = *(uint32_t*)(vmMemory + vmRegister->sp);
+				vmRegister->sp += 4;
+				break;
 			case QUIT:
-				printf("VM: Program quited");
+				printf("VM: Program quited\n");
+				oneStepDebug();
 				exit(vmRegister->r0);
 			}
 			vmRegister->pc++;
@@ -147,7 +155,7 @@ private:
 	// 从当前指向位置加载 1 字节数据
 	uint8_t readCode(int _before = 0)
 	{
-		return *reinterpret_cast<uint8_t*>(reinterpret_cast<size_t>(code) + this->vmRegister->pc);
+		return *reinterpret_cast<uint8_t*>(reinterpret_cast<size_t>(vmMemory + vmRegister->ss) + this->vmRegister->pc);
 	}
 
 	void getArguments(int* mode, uint32_t** firReg, uint32_t** secReg, int *imm, int before = 0)
@@ -171,7 +179,7 @@ private:
 		case 0b001: return &vmRegister->r1;
 		case 0b010: return &vmRegister->r2;
 		case 0b011: return &vmRegister->r3;
-		case 0b100: return &vmRegister->r4;
+		case 0b100: return &vmRegister->ss;
 		case 0b101: return &vmRegister->pc;
 		case 0b110: return &vmRegister->sp;
 		case 0b111: return &vmRegister->bp;
@@ -207,32 +215,36 @@ private:
 	void printAllRegisters()
 	{
 		char buffer[4096];
-		sprintf(buffer, "\tr0: %#x(%d) r1: %#x(%d) r2: %#x(%d) r3: %#x(%d)\n\tr4: %#x(%d) pc: %#x(%d) sp: %#x(%d) bp: %#x(%d)\n",
+		sprintf(buffer, "\tr0: %#x(%d) r1: %#x(%d) r2: %#x(%d) r3: %#x(%d)\n\tss: %#x(%d) pc: %#x(%d) sp: %#x(%d) bp: %#x(%d)\n",
 			vmRegister->r0, vmRegister->r0, vmRegister->r1, vmRegister->r1, vmRegister->r2, vmRegister->r2,
-			vmRegister->r3, vmRegister->r3, vmRegister->r4, vmRegister->r4, vmRegister->pc, vmRegister->pc,
+			vmRegister->r3, vmRegister->r3, vmRegister->ss, vmRegister->ss, vmRegister->pc, vmRegister->pc,
 			vmRegister->sp, vmRegister->sp, vmRegister->bp, vmRegister->bp);
 		printf("All registers\n===============\n%s", buffer);
 	}
 
 	// 单步调试
-	void oneStepDebug()
+	void oneStepDebug(bool breakpoint = false)
 	{
+		if ((!debug || skipOneStepDebug) && !breakpoint) return;
+		printAllRegisters();
+		printf("\n");
 		for (;;)
 		{
 			std::string in;
-			printf("(%#x) ", vmRegister->pc);
+			printf("(%#x) ", vmRegister->ss + vmRegister->pc);
 			fflush(stdout);
 			std::cin >> in;
 			if (in == "r") printAllRegisters();
 			else if (in == "n") break;
-			else if (in == "s") { debug = false; break; }
-			else if (in == "p") printf("%#x: %#x", vmRegister->pc, *(vmMemory + vmRegister->pc));
+			else if (in == "s") { skipOneStepDebug = true; break; }
+			else if (in == "p") printf("%#x + %#x: %#x", vmRegister->ss, vmRegister->pc, *(vmMemory + vmRegister->ss + vmRegister->pc));
 			else printf("Bad command %s", in.c_str());
 			printf("\n");
 		}
 	}
 
 	bool debug = false;
+	bool skipOneStepDebug = false;
 
 	VMInfo* vmInfo;
 	VMRegister* vmRegister;
@@ -241,7 +253,4 @@ private:
 	int vmHeapStart = 0;
 
 	uint8_t* vmMemory = nullptr;
-
-	uint8_t* code;
-	uint8_t* data;
 };

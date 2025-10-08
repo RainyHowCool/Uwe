@@ -44,7 +44,7 @@ int generate_ir(std::string code, char** mem)
 	// IR 的 AST 规则
 	std::list<ParserRule> rules =
 	{
-		RRULE([&Nodes](LexerResult result) -> Option<int> {
+		ParserRule([&Nodes](LexerResult result) -> Option<int> {
 				// 节点
 				Node* node;
 				std::string keyword(result.get(0).result.c_str());
@@ -66,7 +66,22 @@ int generate_ir(std::string code, char** mem)
 
 				Nodes.push_back(node);
 				return Option<int>(true, 0);
-			}, { "IDENTIFIER", "IDENTIFIER", "COMMA", "IDENTIFIER" })
+			}, { "IDENTIFIER", "IDENTIFIER", "COMMA", "IDENTIFIER" }),
+		ParserRule([&Nodes](LexerResult result) -> Option<int> {
+			// 节点
+				Node* node;
+				std::string keyword(result.get(0).result.c_str());
+				std::string para1(result.get(1).result.c_str());
+				// 检查 keyword
+				if (keyword == "push")
+					node = dynamic_cast<Node*>(new PushNode(para1));
+				else if (keyword == "pop")
+					node = dynamic_cast<Node*>(new PopNode(para1));
+				else
+					Log.fatal("Bad command");
+				Nodes.push_back(node);
+				return Option<int>(true, 0);
+		}, { "IDENTIFIER", "IDENTIFIER" })
 	};
 
 	// 运行词法解析器
