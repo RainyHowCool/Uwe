@@ -127,8 +127,8 @@ public:
 					break;
 			}
 
-			if (!matched)
-				Log.fatal("AST Error");
+			//if (!matched)
+				//Log.fatal("AST Error");
 			results.clear();
 			rule.clear();
 			pos++;
@@ -269,4 +269,53 @@ public:
 	}
 private:
 	std::string nreg;
+};
+
+export class DataNode
+	: public Node
+{
+public:
+	DataNode(std::string str)
+	{
+		this->str = str;
+	}
+	virtual int codegen(char* mem) override
+	{
+		auto len = str.length();
+		memcpy(mem, str.c_str(), len);
+		mem[len] = 0;
+		return len + 1;
+	}
+private:
+	std::string str;
+};
+
+export class InvokeNode
+	: public Node
+{
+public:
+	InvokeNode()
+	{
+	}
+
+	virtual int codegen(char* mem) override
+	{
+		mem[0] = 0xF1;
+		return 1;
+	}
+};
+
+export class QuitNode
+	: public Node
+{
+public:
+	QuitNode()
+	{
+	}
+
+	virtual int codegen(char* mem) override
+	{
+		mem[0] = 0xF0;
+		return 1;
+	}
 };

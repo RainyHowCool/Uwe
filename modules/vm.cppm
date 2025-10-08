@@ -48,7 +48,7 @@ public:
 // 字节码
 enum Opcode
 {
-	MOV = 0xA0, ADD = 0xA1, SUB = 0xA2, MUL = 0xA3, DIV = 0xA4, PUSH = 0xA5, POP = 0xA6, QUIT = 0xF0
+	MOV = 0xA0, ADD = 0xA1, SUB = 0xA2, MUL = 0xA3, DIV = 0xA4, PUSH = 0xA5, POP = 0xA6, QUIT = 0xF0, INVOKE = 0xF1
 };
 
 // 虚拟机实例
@@ -83,7 +83,8 @@ public:
 		this->vmMemSize = vmMemSize;
 		// 5. 拷贝虚拟机数据
 		memcpy(this->vmMemory, vmRaw, sizeOfRaw);
-		printf("VM: %zu bytes has been copyed to %#zx from %#zx\n", sizeof(vmRaw), reinterpret_cast<size_t>(vmRaw), reinterpret_cast<size_t>(vmMemory));
+		if (debug)
+			printf("VM: %zu bytes has been copyed to %#zx from %#zx\n", sizeof(vmRaw), reinterpret_cast<size_t>(vmMemory), reinterpret_cast<size_t>(vmRaw));
 		// 6. 设置栈起始位置
 		vmRegister->sp = vmMemSize;
 	}
@@ -96,7 +97,8 @@ public:
 		uint32_t* firReg = nullptr;
 		uint32_t* secReg = nullptr;
 		int imm = 0;
-		printf("VM: One-Step Debug enabled\n\n");
+		if (debug)
+			printf("VM: One-Step Debug enabled\n\n");
 		vmRegister->ss = vmInfo->vmCodeRegionOffest;
 		// 2. 执行代码
 		for (;;)
@@ -136,22 +138,79 @@ public:
 				else Log.fatal("DIV: Unmatched mode");
 				break;
 			case PUSH:
-				vmRegister->sp -= 4;
-				*(uint32_t*)(vmMemory + vmRegister->sp) = *getRegister(readCode(vmRegister->pc++));
+				vmPush(getRegister(readCode(vmRegister->pc++)));
 				break;
 			case POP:
-				*getRegister(readCode(vmRegister->pc++)) = *(uint32_t*)(vmMemory + vmRegister->sp);
-				vmRegister->sp += 4;
+				vmPop(getRegister(readCode(vmRegister->pc++)));
+				break;
+			case INVOKE:
+				vmInvoke();
 				break;
 			case QUIT:
-				printf("VM: Program quited\n");
-				oneStepDebug();
-				exit(vmRegister->r0);
+				vmQuit();
+				break;
 			}
 			vmRegister->pc++;
 		}
 	}
 private:
+	void vmInvoke()
+	{
+		uint32_t oldR0 = vmRegister->r0;
+		uint32_t oldPC = vmRegister->pc;
+		// 1. 获取调用地址
+		vmPop(&vmRegister->r0);
+		uint32_t addr = vmRegister->r0;
+		// 2. 获取名称
+		vmRegister->ss = vmInfo->vmDataRegionOffest;
+		vmRegister->pc = addr - 1;
+		std::string name = readString();
+		// 3. 调用函数
+		if (name == "putl")
+		{
+			vmPutl();
+		}
+		// 4. 恢复现场
+		vmRegister->r0 = oldR0;
+		vmRegister->pc = oldPC;
+		vmRegister->ss = vmInfo->vmCodeRegionOffest;
+	}
+
+	void vmPutl()
+	{
+		uint32_t oldR0 = vmRegister->r0;
+		uint32_t oldPC = vmRegister->pc;
+		vmRegister->ss = vmInfo->vmDataRegionOffest;
+		vmPop(&vmRegister->r0);
+		uint32_t addr = vmRegister->r0;
+		vmRegister->pc = addr - 1;
+		std::string str = readString();
+		printf("%s\n", str.c_str());
+		vmRegister->r0 = oldR0;
+		vmRegister->pc = oldPC;
+		vmRegister->ss = vmInfo->vmCodeRegionOffest;
+	}
+
+	void vmPush(uint32_t* registerId)
+	{
+		vmRegister->sp -= 4;
+		*(uint32_t*)(vmMemory + vmRegister->sp) = *registerId;
+	}
+
+	void vmPop(uint32_t* registerId)
+	{
+		*registerId = *(uint32_t*)(vmMemory + vmRegister->sp);
+		vmRegister->sp += 4;
+	}
+
+	void vmQuit()
+	{
+		if (debug)
+			printf("VM: Quiting...\n");
+		oneStepDebug();
+		exit(0);
+	}
+
 	// 从当前指向位置加载 1 字节数据
 	uint8_t readCode(int _before = 0)
 	{
@@ -199,6 +258,18 @@ private:
 		return res;
 	}
 
+	std::string readString(int _before = 0)
+	{
+		std::string res = "";
+		for (int i = 0;; i++)
+		{
+			char a = readCode(this->vmRegister->pc++);
+			if (a == 0) break;
+			else res += a;
+		}
+		return res;
+	}
+
 	static void printVMInfo(VMInfo* vmInfo)
 	{
 		printf("VM: Debug enabled\n");
@@ -225,7 +296,7 @@ private:
 	// 单步调试
 	void oneStepDebug(bool breakpoint = false)
 	{
-		if ((!debug || skipOneStepDebug) && !breakpoint) return;
+		if ((!debug || skipOneStepDebug) && (!breakpoint && !debug)) return;
 		printAllRegisters();
 		printf("\n");
 		for (;;)
